@@ -1,8 +1,0 @@
-{
-  "/overview/page": "app/overview/page.js",
-  "/examinations/page": "app/examinations/page.js",
-  "/monitoring/page": "app/monitoring/page.js",
-  "/alerts/page": "app/alerts/page.js",
-  "/investigations/page": "app/investigations/page.js",
-  "/alerts/[alertId]/page": "app/alerts/[alertId]/page.js"
-}

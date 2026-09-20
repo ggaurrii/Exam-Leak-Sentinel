@@ -10,8 +10,8 @@ Globals:
     Environment:
       Variables:
         DATA_PROVIDER: dynamodb
-        EMBEDDING_PROVIDER: bedrock
-        CLASSIFICATION_PROVIDER: bedrock
+        EMBEDDING_PROVIDER: local
+        CLASSIFICATION_PROVIDER: local
         TITAN_EMBED_MODEL_ID: amazon.titan-embed-text-v1
         CLAUDE_MODEL_ID: anthropic.claude-3-5-sonnet-20241022-v2:0
         BEDROCK_REGION: !Ref AWS::Region
@@ -40,36 +40,84 @@ Resources:
     Properties:
       TableName: ExamLeakSentinel-Alerts
       BillingMode: PAY_PER_REQUEST
+
       AttributeDefinitions:
         - AttributeName: alert_id
           AttributeType: S
+        - AttributeName: risk_tier
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+
       KeySchema:
         - AttributeName: alert_id
           KeyType: HASH
+
+      GlobalSecondaryIndexes:
+        - IndexName: RiskTierIndex
+          KeySchema:
+            - AttributeName: risk_tier
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
   InvestigationsTable:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: ExamLeakSentinel-Investigations
       BillingMode: PAY_PER_REQUEST
+
       AttributeDefinitions:
         - AttributeName: investigation_id
           AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+
       KeySchema:
         - AttributeName: investigation_id
           KeyType: HASH
+
+      GlobalSecondaryIndexes:
+        - IndexName: StatusIndex
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
   FeedEventsTable:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: ExamLeakSentinel-FeedEvents
       BillingMode: PAY_PER_REQUEST
+
       AttributeDefinitions:
         - AttributeName: event_id
           AttributeType: S
+        - AttributeName: exam_id
+          AttributeType: S
+        - AttributeName: ingested_at
+          AttributeType: S
+
       KeySchema:
         - AttributeName: event_id
           KeyType: HASH
+
+      GlobalSecondaryIndexes:
+        - IndexName: ExamIndex
+          KeySchema:
+            - AttributeName: exam_id
+              KeyType: HASH
+            - AttributeName: ingested_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
   # ---------- Lambda functions (one per handler) ----------
 
@@ -103,6 +151,17 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref ExamsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref InvestigationsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref FeedEventsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /exams
+            Method: GET
       Events:
         Api:
           Type: HttpApi
