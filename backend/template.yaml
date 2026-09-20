@@ -1,0 +1,237 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Exam Leak Sentinel backend - Lambda + API Gateway + DynamoDB + Bedrock
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 25
+    MemorySize: 256
+    Environment:
+      Variables:
+        DATA_PROVIDER: dynamodb
+        EMBEDDING_PROVIDER: bedrock
+        CLASSIFICATION_PROVIDER: bedrock
+        TITAN_EMBED_MODEL_ID: amazon.titan-embed-text-v1
+        CLAUDE_MODEL_ID: anthropic.claude-3-5-sonnet-20241022-v2:0
+        BEDROCK_REGION: !Ref AWS::Region
+        EXAMS_TABLE: !Ref ExamsTable
+        ALERTS_TABLE: !Ref AlertsTable
+        INVESTIGATIONS_TABLE: !Ref InvestigationsTable
+        FEED_EVENTS_TABLE: !Ref FeedEventsTable
+
+Resources:
+
+  # ---------- DynamoDB tables ----------
+  ExamsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ExamLeakSentinel-Exams
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: exam_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: exam_id
+          KeyType: HASH
+
+  AlertsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ExamLeakSentinel-Alerts
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: alert_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: alert_id
+          KeyType: HASH
+
+  InvestigationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ExamLeakSentinel-Investigations
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: investigation_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: investigation_id
+          KeyType: HASH
+
+  FeedEventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ExamLeakSentinel-FeedEvents
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: event_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: event_id
+          KeyType: HASH
+
+  # ---------- Lambda functions (one per handler) ----------
+
+  RegisterExamFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: handlers.register_exam.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ExamsTable
+        - Statement:
+            - Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource:
+                - !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1
+                - !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /exams
+            Method: POST
+
+  ListExamsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: handlers.list_exams.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ExamsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /exams
+            Method: GET
+
+  IngestCandidateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: handlers.ingest_candidate.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ExamsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InvestigationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FeedEventsTable
+        - Statement:
+            - Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource:
+                - !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1
+                - !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /exams/{exam_id}/candidates
+            Method: POST
+
+  TriggerSyntheticFeedFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: handlers.trigger_synthetic_feed.handler
+      Timeout: 29
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ExamsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InvestigationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FeedEventsTable
+        - Statement:
+            - Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource:
+                - !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1
+                - !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /exams/{exam_id}/synthetic-feed
+            Method: POST
+
+  ListAlertsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: handlers.list_alerts.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlertsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /alerts
+            Method: GET
+
+  GetAlertDetailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: handlers.get_alert_detail.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ExamsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /alerts/{alert_id}
+            Method: GET
+
+  ListInvestigationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: handlers.list_investigations.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref InvestigationsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /investigations
+            Method: GET
+
+  # ---------- API Gateway (HTTP API, cheaper + simpler than REST API) ----------
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+          - POST
+        AllowHeaders:
+          - "*"
+
+Outputs:
+  ApiBaseUrl:
+    Description: Base URL for the API Gateway HTTP API
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
